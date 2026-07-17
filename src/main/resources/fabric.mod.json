@@ -1,0 +1,28 @@
+{
+	"schemaVersion": 1,
+	"id": "tag",
+	"version": "${version}",
+	"name": "Tag",
+	"description": "The tag mod for Spooncraft Season 6!",
+	"authors": [
+		"FortP"
+	],
+	"contact": {},
+	"license": "CC0-1.0",
+	"icon": "assets/tag/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"org.fortp.tag.Tag"
+		]
+	},
+	"mixins": [
+		"tag.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.19.2",
+		"minecraft": "~26.2",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}
