@@ -18,6 +18,7 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import org.fortp.tag.Tag;
 import org.fortp.tag.TickScheduler;
+import org.fortp.tag.config.ConfigManager;
 import org.fortp.tag.integration.AfkPlusIntegration;
 import org.fortp.tag.integration.VanishIntegration;
 
@@ -26,18 +27,6 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class GameManager {
-    private static final int WARNING_SECONDS = 5 * 60;
-    private static final int BREAKAWAY_SECONDS = 15;
-    private static final int CAMPING_SECONDS = 60;
-    private static final int MAX_GAME_DURATION_SECONDS = 10 * 60;
-    private static final int CAMPING_CHUNK_RADIUS = 1;
-    private static final int SCORE_INTERVAL_SECONDS = 60;
-    private static final int BASE_POINTS_PER_INTERVAL = 10;
-    private static final int TAG_BOUNTY = 50;
-    private static final int FORFEIT_PENALTY = -50;
-    private static final double PITY_INCREMENT = 0.5;
-    private static final double MOBILITY_LOCKOUT_DISTANCE_SQR = 128.0 * 128.0;
-
     private static GameData gameData;
     private static MinecraftServer server;
 
@@ -74,11 +63,10 @@ public class GameManager {
         if (roundPending || gameActive) return;
 
         roundPending = true;
-        warningTicksRemaining = WARNING_SECONDS * 20;
-        server.getPlayerList().broadcastSystemMessage(
+        warningTicksRemaining = ConfigManager.get().getWarningSeconds() * 20;
+        sendMessageToAllPlaying(
                 Component.literal("A Tag round will begin in 5 minutes")
-                        .withStyle(ChatFormatting.GOLD),
-                false);
+                        .withStyle(ChatFormatting.GOLD));
         Tag.LOGGER.info("Tag round warning started. Ticks remaining: {}", warningTicksRemaining);
     }
 
@@ -103,7 +91,7 @@ public class GameManager {
 
     public static boolean checkTag(UUID taggerId, UUID targetId) {
         Tag.LOGGER.debug("checkTag() called by taggerId={} on targetId={}", taggerId, targetId);
-        if (!gameActive || runner == null || !targetId.equals(runner)) {
+        if (!gameActive || !targetId.equals(runner)) {
             Tag.LOGGER.debug("Tag invalid: gameActive={}, runnerId={}, isTargetRunner={}", gameActive, runner, targetId.equals(runner));
             return false;
         }
@@ -112,9 +100,12 @@ public class GameManager {
             return true;
         }
 
-        int bounty = TAG_BOUNTY + (runnerRoundPoints / 4);
+        int bounty = ConfigManager.get().getTagBounty() + (int) Math.round(runnerRoundPoints / 4.0);
         if (gameData != null) {
             gameData.addScore(taggerId, bounty);
+            gameData.addTaggerScore(taggerId, bounty);
+            gameData.addTag(taggerId);
+            gameData.setHighScore(taggerId, Math.max(gameData.getHighScore(taggerId), bounty));
         }
 
         String taggerName = getPlayerName(taggerId);
@@ -139,7 +130,7 @@ public class GameManager {
         ServerPlayer runnerPlayer = server.getPlayerList().getPlayer(runner);
         boolean block = runnerPlayer != null
                 && player.level().dimension().equals(runnerPlayer.level().dimension())
-                && player.distanceToSqr(runnerPlayer) <= MOBILITY_LOCKOUT_DISTANCE_SQR;
+                && player.distanceToSqr(runnerPlayer) <= ConfigManager.get().getMobilityLockoutDistanceSqr();
         if (block) {
             Tag.LOGGER.debug("Blocked mobility item {} for chaser: {} (too close to runner): {} blocks", stack.getItem(), player.getName().getString(), player.distanceToSqr(runnerPlayer));
         }
@@ -151,6 +142,14 @@ public class GameManager {
         if (gameActive && player.getUUID().equals(runner)) {
             Tag.LOGGER.info("Runner disconnected! Triggering forfeit");
             forfeitRunner("disconnect");
+        }
+    }
+
+    public static void onPlayerConnect(ServerPlayer player) {
+        Tag.LOGGER.debug("Player connected: {}", player.getName().getString());
+        if (gameActive && gameData.getScores().containsKey(player.getUUID())) {
+            player.sendSystemMessage(Component.literal("There's an active round of tag!").withStyle(ChatFormatting.GOLD));
+            player.sendSystemMessage(Component.literal(player.level().getPlayers(p -> p.getUUID().equals(runner)).getFirst().getPlainTextName() + " is the runner!").withStyle(ChatFormatting.GOLD));
         }
     }
 
@@ -230,12 +229,12 @@ public class GameManager {
             Tag.LOGGER.debug("Round has been active for {} ticks. Runner: {}", roundTicks, runnerPlayer.getName().getString());
         }
 
-        if (scoreTicks >= SCORE_INTERVAL_SECONDS * 20) {
+        if (scoreTicks >= ConfigManager.get().getScoreIntervalSeconds() * 20) {
             scoreTicks = 0;
             awardRunnerInterval();
         }
 
-        if (roundTicks > MAX_GAME_DURATION_SECONDS * 20) {
+        if (roundTicks > ConfigManager.get().getMaxGameDurationSeconds() * 20) {
             endRound(Component.literal(runnerPlayer.getName().getString() + " has gotten away!").withStyle(ChatFormatting.GREEN), false, true);
         }
     }
@@ -247,10 +246,9 @@ public class GameManager {
                 .toList();
 
         if (eligiblePlayers.size() < 2) {
-            server.getPlayerList().broadcastSystemMessage(
+            sendMessageToAllPlaying(
                     Component.literal("Tag round canceled: not enough eligible players in the Overworld")
-                            .withStyle(ChatFormatting.RED),
-                    false);
+                            .withStyle(ChatFormatting.RED));
             Tag.LOGGER.warn("Round canceled: {} eligible players found", eligiblePlayers.size());
             return;
         }
@@ -261,7 +259,7 @@ public class GameManager {
         gameActive = true;
         roundTicks = 0;
         scoreTicks = 0;
-        breakawayTicks = BREAKAWAY_SECONDS * 20;
+        breakawayTicks = ConfigManager.get().getBreakawaySeconds() * 20;
         runnerRoundPoints = 0;
         campOrigin = selected.chunkPosition();
         campTicks = 0;
@@ -272,7 +270,7 @@ public class GameManager {
                 if (player.getUUID().equals(runner)) {
                     gameData.setRunnerWeight(player.getUUID(), 1.0);
                 } else {
-                    gameData.addRunnerWeight(player.getUUID(), PITY_INCREMENT);
+                    gameData.addRunnerWeight(player.getUUID(), ConfigManager.get().getPityIncrement());
                 }
             }
         }
@@ -280,14 +278,13 @@ public class GameManager {
         if (selected.isPassenger() && selected.getVehicle() instanceof HappyGhast) {
             selected.stopRiding();
         }
-        selected.addEffect(new MobEffectInstance(MobEffects.SPEED, BREAKAWAY_SECONDS * 20, 1, false, true, true));
-        sendTitleToAll(Component.literal(selected.getName().getString() + " is THE RUNNER!")
+        selected.addEffect(new MobEffectInstance(MobEffects.SPEED, ConfigManager.get().getBreakawaySeconds() * 20, 1, false, true, true));
+        sendTitleToAllPlaying(Component.literal(selected.getName().getString() + " is THE RUNNER!")
                 .withStyle(ChatFormatting.RED, ChatFormatting.BOLD));
-        server.getPlayerList().broadcastSystemMessage(
+        sendMessageToAllPlaying(
                 Component.literal(selected.getName().getString()
                                 + " is the runner. Tag them with a left-click!")
-                        .withStyle(ChatFormatting.GOLD),
-                false);
+                        .withStyle(ChatFormatting.GOLD));
         Tag.LOGGER.info("{} selected as runner", selected.getName().getString());
         Tag.LOGGER.debug("Round setup complete. Breakaway ticks set to {}", breakawayTicks);
     }
@@ -296,6 +293,7 @@ public class GameManager {
         double totalWeight = 0.0;
         for (ServerPlayer player : eligiblePlayers) {
             totalWeight += gameData != null ? gameData.getRunnerWeight(player.getUUID()) : 1.0;
+            gameData.addTaggerTime(player.getUUID());
         }
 
         Tag.LOGGER.debug("Rolling runner. Total weight: {}", totalWeight);
@@ -305,15 +303,19 @@ public class GameManager {
             cursor += gameData != null ? gameData.getRunnerWeight(player.getUUID()) : 1.0;
             if (roll < cursor) {
                 Tag.LOGGER.debug("Rolled runner: {} (roll: {}, cursor: {})", player.getName().getString(), roll, cursor);
+                gameData.removeTaggerTime(player.getUUID());
+                gameData.addRunnerTime(player.getUUID());
                 return player;
             }
         }
 
         Tag.LOGGER.debug("Fell through to last eligible player: {}", eligiblePlayers.getLast().getName().getString());
+        gameData.removeTaggerTime(eligiblePlayers.getLast().getUUID());
+        gameData.addRunnerTime(eligiblePlayers.getLast().getUUID());
         return eligiblePlayers.getLast();
     }
 
-    private static boolean isEligibleRunner(ServerPlayer player) {
+    public static boolean isEligibleRunner(ServerPlayer player) {
         return player.isAlive()
                 && !player.isSpectator()
                 && player.level().dimension().equals(Level.OVERWORLD)
@@ -342,10 +344,10 @@ public class GameManager {
 
         campTicks++;
         if (campTicks % 200 == 0 && !runnerCamping) { // Every 10 seconds
-            Tag.LOGGER.debug("Runner has been in the same chunk area for {} ticks ({} needed to camp)", campTicks, CAMPING_SECONDS * 20);
+            Tag.LOGGER.debug("Runner has been in the same chunk area for {} ticks ({} needed to camp)", campTicks, ConfigManager.get().getCampingSeconds() * 20);
         }
 
-        if (!runnerCamping && campTicks >= CAMPING_SECONDS * 20) {
+        if (!runnerCamping && campTicks >= ConfigManager.get().getCampingSeconds() * 20) {
             runnerCamping = true;
             runnerPlayer.addEffect(new MobEffectInstance(MobEffects.GLOWING, 20, 0, false, true, true));
             runnerPlayer.sendSystemMessage(Component.literal("You've stopped moving! Keep running to earn points").withStyle(ChatFormatting.RED), false);
@@ -354,8 +356,8 @@ public class GameManager {
     }
 
     private static boolean leftCampingArea(ChunkPos currentChunk) {
-        return Math.abs(currentChunk.x() - campOrigin.x()) > CAMPING_CHUNK_RADIUS
-                || Math.abs(currentChunk.z() - campOrigin.z()) > CAMPING_CHUNK_RADIUS;
+        return Math.abs(currentChunk.x() - campOrigin.x()) > ConfigManager.get().getCampingChunkRadius()
+                || Math.abs(currentChunk.z() - campOrigin.z()) > ConfigManager.get().getCampingChunkRadius();
     }
 
     private static void awardRunnerInterval() {
@@ -370,9 +372,11 @@ public class GameManager {
             return;
         }
 
-        int points = (int) Math.round(BASE_POINTS_PER_INTERVAL * (1.0 + Math.sqrt(chasers)));
+        int points = (int) Math.round(ConfigManager.get().getBasePointsPerInterval() * (1.0 + Math.sqrt(chasers)));
         gameData.addScore(runner, points);
+        gameData.addRunnerScore(runner, points);
         runnerRoundPoints += points;
+        gameData.setHighScore(runner, Math.max(gameData.getHighScore(runner), runnerRoundPoints));
 
         Tag.LOGGER.debug("Awarding {} interval points to runner. Active chasers: {}. Total round points so far: {}", points, chasers, runnerRoundPoints);
 
@@ -405,8 +409,10 @@ public class GameManager {
         if (gameData != null && forfeitingRunner != null) {
             if (runnerRoundPoints > 0) {
                 gameData.addScore(forfeitingRunner, -runnerRoundPoints);
+                gameData.addRunnerScore(forfeitingRunner, -runnerRoundPoints);
             }
-            gameData.addScore(forfeitingRunner, FORFEIT_PENALTY);
+            gameData.addScore(forfeitingRunner, ConfigManager.get().getForfeitPenalty());
+            gameData.addRunnerScore(forfeitingRunner, ConfigManager.get().getForfeitPenalty());
         }
 
         endRound(Component.literal(runnerName + " forfeited by " + reason + " and lost 50 points")
@@ -436,19 +442,29 @@ public class GameManager {
         runnerCamping = false;
 
         if (announce) {
-            server.getPlayerList().broadcastSystemMessage(message, false);
+            sendMessageToAllPlaying(message);
         } else if (!forfeited) {
             Tag.LOGGER.info(message.getString());
         }
     }
 
-    private static void sendTitleToAll(Component title) {
+    private static void sendTitleToAllPlaying(Component title) {
         ClientboundSetTitleTextPacket titlePacket = new ClientboundSetTitleTextPacket(title);
         ClientboundSetTitlesAnimationPacket animPacket = new ClientboundSetTitlesAnimationPacket(10, 70, 20);
 
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            player.connection.send(animPacket);
-            player.connection.send(titlePacket);
+            if (isEligibleRunner(player)) {
+                player.connection.send(animPacket);
+                player.connection.send(titlePacket);
+            }
+        }
+    }
+
+    private static void sendMessageToAllPlaying(Component message) {
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            if (isEligibleRunner(player)) {
+                player.sendSystemMessage(message);
+            }
         }
     }
 

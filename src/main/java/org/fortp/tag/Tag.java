@@ -10,6 +10,7 @@ import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -18,6 +19,7 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.animal.happyghast.HappyGhast;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import org.fortp.tag.config.ConfigManager;
 import org.fortp.tag.game.GameManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,11 +31,14 @@ public class Tag implements ModInitializer {
     @Override
     public void onInitialize() {
         TickScheduler.init();
+        ConfigManager.load(FabricLoader.getInstance().getConfigDir().resolve("tag.json"));
         CommandRegistrationCallback.EVENT.register(TagCommands::registerCommands);
         ServerLifecycleEvents.SERVER_STARTED.register(GameManager::initialize);
         ServerTickEvents.END_SERVER_TICK.register(GameManager::tick);
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
                 GameManager.onPlayerDisconnect(handler.player));
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) ->
+                GameManager.onPlayerConnect(handler.player));
         ServerEntityLevelChangeEvents.AFTER_PLAYER_CHANGE_LEVEL.register((player, origin, destination) ->
                 GameManager.onPlayerChangedLevel(player, destination));
 
