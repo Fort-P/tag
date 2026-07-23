@@ -1,13 +1,19 @@
 package org.fortp.tag.game;
 
 import com.mojang.authlib.GameProfile;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.arguments.GameProfileArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.players.NameAndId;
 
+import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -92,6 +98,27 @@ public class GameCommands {
             return 1;
         } catch (NullPointerException e) {
             context.getSource().sendFailure(Component.literal("You can only run this command in game!"));
+            return 0;
+        }
+    }
+
+    public static int editScore(CommandContext<CommandSourceStack> context) {
+        try {
+            Collection<NameAndId> playerList = GameProfileArgument.getGameProfiles(context, "player");
+            int amount = IntegerArgumentType.getInteger(context, "amount");
+            GameData gameData = GameData.getGameData(context.getSource().getServer());
+
+            for (NameAndId entry : playerList) {
+                UUID uuid = entry.id();
+                String name = entry.name();
+
+                gameData.addScore(uuid, amount);
+
+                context.getSource().sendSuccess(() -> Component.literal("Added " +  amount + " to " + name), true);
+            }
+            return 1;
+        } catch (Exception e) {
+            context.getSource().sendFailure(Component.literal("An error occurred: " + e.getMessage()));
             return 0;
         }
     }
