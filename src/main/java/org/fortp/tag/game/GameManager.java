@@ -148,8 +148,11 @@ public class GameManager {
     public static void onPlayerConnect(ServerPlayer player) {
         Tag.LOGGER.debug("Player connected: {}", player.getName().getString());
         if (gameActive && gameData.getScores().containsKey(player.getUUID())) {
-            player.sendSystemMessage(Component.literal("There's an active round of tag!").withStyle(ChatFormatting.GOLD));
-            player.sendSystemMessage(Component.literal(player.level().getPlayers(p -> p.getUUID().equals(runner)).getFirst().getPlainTextName() + " is the runner!").withStyle(ChatFormatting.GOLD));
+            ServerPlayer activeRunner = player.level().getServer().getPlayerList().getPlayer(runner);
+            if (activeRunner != null) {
+                player.sendSystemMessage(Component.literal("There's an active round of tag!").withStyle(ChatFormatting.GOLD));
+                player.sendSystemMessage(Component.literal(activeRunner.getPlainTextName() +" is the runner!").withStyle(ChatFormatting.GOLD));
+            }
         }
     }
 
